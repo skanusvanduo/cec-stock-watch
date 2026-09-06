@@ -11,6 +11,10 @@ on:
         description: "Send a test push instead of checking stock"
         type: boolean
         default: false
+      duration_minutes:
+        description: "How long this run should keep polling (max 350)"
+        type: string
+        default: "4"
 
 # If a previous run is still going, let it finish rather than piling up.
 concurrency:
@@ -23,7 +27,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 9
+    timeout-minutes: 355
 
     steps:
       - uses: actions/checkout@v4
@@ -69,7 +73,11 @@ jobs:
           # 80s polling, instead of sampling a single instant. GitHub
           # cron timing is irregular, so covering a window matters
           # more than firing precisely on schedule.
-          python stock_watch.py --once --duration 240 --interval 80 --watch-category
+          mins="${{ inputs.duration_minutes || '4' }}"
+          case "$mins" in ''|*[!0-9]*) mins=4 ;; esac
+          [ "$mins" -gt 350 ] && mins=350
+          echo "polling for ${mins} minutes"
+          python stock_watch.py --once --duration $((mins * 60)) --interval 80 --watch-category
           code=$?
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           case $code in
