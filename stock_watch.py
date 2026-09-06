@@ -621,6 +621,11 @@ def main():
                     help="re-fire the in-stock alert every N minutes")
     ap.add_argument("--no-state", action="store_true",
                     help="do not persist state (alerts every run)")
+    ap.add_argument("--duration", type=int, default=0,
+                    help="with --once, keep polling for this many seconds "
+                         "instead of checking a single instant; returns as "
+                         "soon as it is in stock. Lets one CI run cover a "
+                         "window, so irregular cron timing matters less.")
     ap.add_argument("--watch-category", action="store_true",
                     help="also watch the category page for a new 16/512 tile")
     args = ap.parse_args()
@@ -659,14 +664,25 @@ def main():
     state = {} if args.no_state else load_state()
 
     if args.once:
-        try:
-            snap = run_once(args, state)
-            if args.watch_category:
-                check_category_once(state, args)
-            return 0 if snap.status == "in_stock" else 1
-        except Exception as e:
-            log(f"error: {type(e).__name__}: {e}")
-            return 2
+        deadline = time.time() + args.duration
+        code, first = 1, True
+        while True:
+            try:
+                snap = run_once(args, state)
+                if first and args.watch_category:
+                    check_category_once(state, args)
+                if snap.status == "in_stock":
+                    return 0
+                code = 1
+            except Exception as e:
+                log(f"error: {type(e).__name__}: {e}")
+                code = 2
+            first = False
+            # Stop once another full poll would overrun the budget, so the
+            # job never exceeds the duration it was given.
+            if time.time() + args.interval >= deadline:
+                return code
+            time.sleep(args.interval + random.uniform(-5, 5))
 
     log(f"watching {args.url}")
     log(f"polling every ~{args.interval}s with jitter (Ctrl-C to stop)")

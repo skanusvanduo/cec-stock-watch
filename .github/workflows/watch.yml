@@ -23,7 +23,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 9
 
     steps:
       - uses: actions/checkout@v4
@@ -65,7 +65,11 @@ jobs:
             python stock_watch.py --test-alert
             exit $?
           fi
-          python stock_watch.py --once --watch-category
+          # --duration makes one run cover a ~4 minute window with
+          # 80s polling, instead of sampling a single instant. GitHub
+          # cron timing is irregular, so covering a window matters
+          # more than firing precisely on schedule.
+          python stock_watch.py --once --duration 240 --interval 80 --watch-category
           code=$?
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           case $code in

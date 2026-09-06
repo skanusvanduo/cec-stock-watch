@@ -409,3 +409,77 @@ def test_coverage_restored_does_not_alert(monkeypatch):
     _run_once_with(monkeypatch, rich, state)
     _, sent = _run_once_with(monkeypatch, rich, state)
     assert [t for t, _, _ in sent if "coverage" in t.lower()] == []
+
+
+# --------------------------------------------------------------------------
+# --duration: one CI run covers a window instead of an instant
+# --------------------------------------------------------------------------
+
+def _fake_clock(monkeypatch, sw):
+    """Virtual time: sleep() advances the clock instead of blocking.
+
+    Without this the loop busy-spins in real time, since a no-op sleep does
+    not move time.time() forward.
+    """
+    now = {"t": 1000.0}
+    monkeypatch.setattr(sw.time, "time", lambda: now["t"])
+    monkeypatch.setattr(sw.time, "sleep", lambda s: now.__setitem__("t", now["t"] + s))
+    return now
+
+
+def test_duration_polls_repeatedly_then_gives_up(monkeypatch):
+    import stock_watch as sw
+    calls = []
+    _fake_clock(monkeypatch, sw)
+    monkeypatch.setattr(sw, "fetch",
+                        lambda url, timeout=30: calls.append(1) or load("out_of_stock.html"))
+    monkeypatch.setattr(sw, "notify", lambda *a, **k: None)
+    monkeypatch.setattr(sw, "load_state", dict)
+    monkeypatch.setattr(sys, "argv",
+                        ["stock_watch.py", "--once", "--duration", "300",
+                         "--interval", "60", "--no-state"])
+    assert sw.main() == 1          # never in stock
+    assert 4 <= len(calls) <= 6    # ~5 polls across a 300s budget
+
+
+def test_duration_returns_immediately_when_in_stock(monkeypatch):
+    import stock_watch as sw
+    calls = []
+    _fake_clock(monkeypatch, sw)
+    monkeypatch.setattr(sw, "fetch",
+                        lambda url, timeout=30: calls.append(1) or load("in_stock.html"))
+    monkeypatch.setattr(sw, "notify", lambda *a, **k: None)
+    monkeypatch.setattr(sw, "load_state", dict)
+    monkeypatch.setattr(sys, "argv",
+                        ["stock_watch.py", "--once", "--duration", "600",
+                         "--interval", "60", "--no-state"])
+    assert sw.main() == 0
+    assert len(calls) == 1         # did not keep polling after a hit
+
+
+def test_duration_never_overruns_its_budget(monkeypatch):
+    """The job must not exceed the time CI gave it."""
+    import stock_watch as sw
+    clock = _fake_clock(monkeypatch, sw)
+    start = clock["t"]
+    monkeypatch.setattr(sw, "fetch", lambda url, timeout=30: load("out_of_stock.html"))
+    monkeypatch.setattr(sw, "notify", lambda *a, **k: None)
+    monkeypatch.setattr(sw, "load_state", dict)
+    monkeypatch.setattr(sys, "argv",
+                        ["stock_watch.py", "--once", "--duration", "240",
+                         "--interval", "60", "--no-state"])
+    sw.main()
+    assert clock["t"] - start <= 240
+
+
+def test_once_without_duration_polls_exactly_once(monkeypatch):
+    import stock_watch as sw
+    calls = []
+    monkeypatch.setattr(sw, "fetch",
+                        lambda url, timeout=30: calls.append(1) or load("out_of_stock.html"))
+    monkeypatch.setattr(sw, "notify", lambda *a, **k: None)
+    monkeypatch.setattr(sw, "load_state", dict)
+    monkeypatch.setattr(sys, "argv",
+                        ["stock_watch.py", "--once", "--no-state"])
+    assert sw.main() == 1
+    assert len(calls) == 1
