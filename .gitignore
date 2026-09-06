@@ -1,0 +1,20 @@
+# Watcher state - local only, never commit
+.stock_watch_state.json
+stock_watch_state.json
+state/
+
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Scratch
+*.log
+*.html.saved

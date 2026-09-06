@@ -1,0 +1,91 @@
+name: cec.lt stock watch
+
+on:
+  schedule:
+    # Every 5 minutes. GitHub treats this as "no sooner than", not a promise -
+    # see the README for the realistic timing you should actually expect.
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      test_alert:
+        description: "Send a test push instead of checking stock"
+        type: boolean
+        default: false
+
+# If a previous run is still going, let it finish rather than piling up.
+concurrency:
+  group: stock-watch
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # Runners are ephemeral, so carry the state file between runs. A cache
+      # key cannot be overwritten, so write a unique one each run and restore
+      # the most recent via the prefix. A cache miss (eviction, first run on a
+      # branch) costs at most one duplicate alert - never a missed one.
+      - name: Restore watcher state
+        uses: actions/cache/restore@v4
+        with:
+          path: state/stock_watch_state.json
+          key: stock-watch-state-${{ github.run_id }}
+          restore-keys: |
+            stock-watch-state-
+
+      - name: Check stock
+        id: check
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          STOCK_WATCH_STATE: state/stock_watch_state.json
+          PYTHONIOENCODING: utf-8
+        run: |
+          set +e
+          mkdir -p state
+          if [ "${{ inputs.test_alert }}" = "true" ]; then
+            # Proves the NTFY_TOPIC secret is wired up, without waiting for
+            # a real restock to find out.
+            python stock_watch.py --test-alert
+            exit $?
+          fi
+          python stock_watch.py --once --watch-category
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          case $code in
+            0) echo "::notice::IN STOCK - alert sent" ;;
+            1) echo "Not in stock." ;;
+            2) echo "::warning::Fetch or parse error" ;;
+          esac
+          # Exit 1 just means "not in stock" - that is not a build failure.
+          # Only a genuine error (2) should mark the run red.
+          [ -f state/stock_watch_state.json ] || echo '{}' > state/stock_watch_state.json
+          [ "$code" = "2" ] && exit 1
+          exit 0
+
+      - name: Save watcher state
+        # Always save, even when the check errored, so the consecutive-unknown
+        # counter survives and can reach its alert threshold. The guard keeps
+        # a first-run fetch error from failing the cache step.
+        if: always()
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: state/stock_watch_state.json
+          key: stock-watch-state-${{ github.run_id }}
