@@ -108,3 +108,34 @@ jobs:
         with:
           path: state/stock_watch_state.json
           key: stock-watch-state-${{ github.run_id }}
+
+      # GitHub's cron scheduler never fired for this repo, so each run starts
+      # its successor instead. workflow_dispatch is reliable here in a way
+      # schedule is not. GITHUB_TOKEN deliberately cannot trigger workflows,
+      # which is why this needs a PAT.
+      #
+      # always() so that even a failed check hands over: a broken link would
+      # stop the watch silently, and silence is indistinguishable from
+      # "no stock yet" - the worst possible failure here.
+      - name: Start the next run
+        if: always() && inputs.test_alert != true
+        env:
+          GH_TOKEN: ${{ secrets.WATCH_PAT }}
+          STOP_AFTER: "20260909"
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::WATCH_PAT is not set - the chain stops here"
+            exit 0
+          fi
+          today=$(date -u +%Y%m%d)
+          if [ "$today" -gt "$STOP_AFTER" ]; then
+            echo "::notice::Past $STOP_AFTER - watch finished, not chaining"
+            exit 0
+          fi
+          mins="${{ inputs.duration_minutes || '350' }}"
+          secs="${{ inputs.interval_seconds || '900' }}"
+          echo "chaining next run: ${mins} min at ${secs}s interval"
+          gh workflow run watch.yml \
+            --repo "${{ github.repository }}" \
+            -f duration_minutes="$mins" \
+            -f interval_seconds="$secs"
