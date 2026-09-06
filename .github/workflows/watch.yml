@@ -114,11 +114,12 @@ jobs:
       # schedule is not. GITHUB_TOKEN deliberately cannot trigger workflows,
       # which is why this needs a PAT.
       #
-      # always() so that even a failed check hands over: a broken link would
-      # stop the watch silently, and silence is indistinguishable from
-      # "no stock yet" - the worst possible failure here.
+      # !cancelled() rather than always(): a *failed* check must still hand
+      # over, since silence is indistinguishable from "no stock yet" - but a
+      # *cancelled* run must not, so that cancelling the in-progress run is a
+      # reliable way to stop the whole chain.
       - name: Start the next run
-        if: always() && inputs.test_alert != true
+        if: ${{ !cancelled() && inputs.test_alert != true }}
         env:
           GH_TOKEN: ${{ secrets.WATCH_PAT }}
           STOP_AFTER: "20260909"
