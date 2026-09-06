@@ -15,6 +15,10 @@ on:
         description: "How long this run should keep polling (max 350)"
         type: string
         default: "4"
+      interval_seconds:
+        description: "Seconds between checks (default 900 = 15 min)"
+        type: string
+        default: "900"
 
 # If a previous run is still going, let it finish rather than piling up.
 concurrency:
@@ -76,8 +80,11 @@ jobs:
           mins="${{ inputs.duration_minutes || '4' }}"
           case "$mins" in ''|*[!0-9]*) mins=4 ;; esac
           [ "$mins" -gt 350 ] && mins=350
-          echo "polling for ${mins} minutes"
-          python stock_watch.py --once --duration $((mins * 60)) --interval 80 --watch-category
+          secs="${{ inputs.interval_seconds || '900' }}"
+          case "$secs" in ''|*[!0-9]*) secs=900 ;; esac
+          [ "$secs" -lt 60 ] && secs=60
+          echo "polling for ${mins} min, every ${secs}s"
+          python stock_watch.py --once --duration $((mins * 60)) --interval "$secs" --watch-category
           code=$?
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           case $code in
