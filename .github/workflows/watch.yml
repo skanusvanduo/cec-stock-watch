@@ -19,6 +19,10 @@ on:
         description: "Seconds between checks (default 900 = 15 min)"
         type: string
         default: "900"
+      product_url:
+        description: "Check a different product (one-off; does not chain)"
+        type: string
+        default: ""
 
 # Keyed by event so scheduled runs and chained runs never queue behind each
 # other. Sharing one group let a stuck pending scheduled run sit ahead of a
@@ -67,6 +71,9 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           STOCK_WATCH_STATE: state/stock_watch_state.json
           PYTHONIOENCODING: utf-8
+          # Via env, never interpolated into the shell: this is a public repo
+          # and workflow inputs are attacker-controllable in principle.
+          PRODUCT_URL: ${{ inputs.product_url }}
         run: |
           set +e
           mkdir -p state
@@ -90,8 +97,15 @@ jobs:
           secs="${{ inputs.interval_seconds || '900' }}"
           case "$secs" in ''|*[!0-9]*) secs=900 ;; esac
           [ "$secs" -lt 60 ] && secs=60
+          set --
+          if [ -n "$PRODUCT_URL" ]; then
+            echo "one-off check of a different product"
+            set -- --url "$PRODUCT_URL" --label "STOCK TEST"
+          else
+            set -- --watch-category
+          fi
           echo "polling for ${mins} min, every ${secs}s"
-          python stock_watch.py --once --duration $((mins * 60)) --interval "$secs" --watch-category
+          python stock_watch.py --once --duration $((mins * 60)) --interval "$secs" "$@"
           code=$?
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           case $code in
@@ -130,7 +144,8 @@ jobs:
       # chain ever died, without spawning a competing chain of their own.
       - name: Start the next run
         if: ${{ !cancelled() && inputs.test_alert != true
-                && github.event_name == 'workflow_dispatch' }}
+                && github.event_name == 'workflow_dispatch'
+                && inputs.product_url == '' }}
         env:
           GH_TOKEN: ${{ secrets.WATCH_PAT }}
           STOP_AFTER: "20260909"
