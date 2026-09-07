@@ -83,6 +83,10 @@ jobs:
           mins="${{ inputs.duration_minutes || '4' }}"
           case "$mins" in ''|*[!0-9]*) mins=4 ;; esac
           [ "$mins" -gt 350 ] && mins=350
+          # Floor of 4 minutes. A shorter run finishes in seconds and then
+          # chains, which spins a new run every few seconds until someone
+          # notices. Cheap guard against a typo burning hundreds of runs.
+          [ "$mins" -lt 4 ] && mins=4
           secs="${{ inputs.interval_seconds || '900' }}"
           case "$secs" in ''|*[!0-9]*) secs=900 ;; esac
           [ "$secs" -lt 60 ] && secs=60
@@ -142,6 +146,8 @@ jobs:
           fi
           mins="${{ inputs.duration_minutes || '350' }}"
           secs="${{ inputs.interval_seconds || '900' }}"
+          case "$mins" in ''|*[!0-9]*) mins=350 ;; esac
+          [ "$mins" -lt 4 ] && mins=4
           echo "chaining next run: ${mins} min at ${secs}s interval"
           gh workflow run watch.yml \
             --repo "${{ github.repository }}" \
