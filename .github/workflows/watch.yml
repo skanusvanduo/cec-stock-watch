@@ -20,9 +20,12 @@ on:
         type: string
         default: "900"
 
-# If a previous run is still going, let it finish rather than piling up.
+# Keyed by event so scheduled runs and chained runs never queue behind each
+# other. Sharing one group let a stuck pending scheduled run sit ahead of a
+# chained successor, and a superseded successor would have killed the chain
+# silently - cancelled runs deliberately do not hand over.
 concurrency:
-  group: stock-watch
+  group: stock-watch-${{ github.event_name }}
   cancel-in-progress: false
 
 permissions:
@@ -118,8 +121,12 @@ jobs:
       # over, since silence is indistinguishable from "no stock yet" - but a
       # *cancelled* run must not, so that cancelling the in-progress run is a
       # reliable way to stop the whole chain.
+      # Only chained runs hand over. Scheduled runs stay short, independent
+      # one-off checks: a second pair of eyes that would still alert if the
+      # chain ever died, without spawning a competing chain of their own.
       - name: Start the next run
-        if: ${{ !cancelled() && inputs.test_alert != true }}
+        if: ${{ !cancelled() && inputs.test_alert != true
+                && github.event_name == 'workflow_dispatch' }}
         env:
           GH_TOKEN: ${{ secrets.WATCH_PAT }}
           STOP_AFTER: "20260909"
